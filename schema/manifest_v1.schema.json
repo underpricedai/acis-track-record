@@ -19,7 +19,6 @@
     "regime",
     "positions",
     "rationale",
-    "backtest_snapshot",
     "prev_manifest_hash",
     "content_hash"
   ],
