@@ -83,8 +83,8 @@
           "description": "Version tag (e.g. '1.0_production')."
         },
         "feature_store_hash": {
-          "type": "string",
-          "description": "SHA-256 (hex, 64 chars) of the deterministically-serialized feature snapshot fed into this run. Enables 'we can reproduce the exact scoring input' claim.",
+          "type": ["string", "null"],
+          "description": "SHA-256 (hex, 64 chars) of the deterministically-serialized feature snapshot fed into this run. Null when feature-store snapshot tracking is not yet wired for the emitting stream; will be populated in a later phase.",
           "pattern": "^[0-9a-f]{64}$"
         },
         "training_data_cutoff": {
@@ -105,11 +105,9 @@
         },
         "probability_vector": {
           "type": "object",
-          "description": "Map of regime_state -> probability. Keys sorted at serialize time for determinism.",
+          "description": "Map of regime target/state -> model output. For the current regime model these are per-target predictions (e.g. predicted_vol_expansion_60d, risk_on_score) — not strictly probabilities but the raw scoring inputs into the state_label choice. Keys sorted at serialize time for determinism.",
           "additionalProperties": {
-            "type": "number",
-            "minimum": 0,
-            "maximum": 1
+            "type": "number"
           }
         }
       }
