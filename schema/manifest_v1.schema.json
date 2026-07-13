@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alphacentauriai.com/track-record/schema/manifest_v1.schema.json",
+  "title": "ACIS Rebalance Manifest v1",
+  "description": "Canonical, deterministically-serialized record of a single rebalance event across the ACIS production streams (equity ai_master_portfolios, sector_rotation_master, options_master). Each manifest is SHA-256 hashed, anchored to Bitcoin via OpenTimestamps, and committed to a public git repo.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "manifest_id",
+    "stream",
+    "strategy_id",
+    "strategy_name",
+    "run_type",
+    "generated_at",
+    "anchor_date",
+    "original_event_date",
+    "retroactive",
+    "model",
+    "regime",
+    "positions",
+    "rationale",
+    "backtest_snapshot",
+    "prev_manifest_hash",
+    "content_hash"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "manifest_id": {
+      "type": "string",
+      "description": "Deterministic UUID v5 seeded on (stream, strategy_id, original_event_date, retroactive).",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "stream": {
+      "type": "string",
+      "enum": ["equity", "sector_rotation", "options"]
+    },
+    "strategy_id": {
+      "type": "string",
+      "description": "Stream-scoped strategy key. Equity: strategy_type from ai_master_portfolios (e.g. 'value_largecap'). Sector rotation: fixed 'sector_rotation_voltgt15' or successor. Options: 'config_{config_id}' (e.g. 'config_20')."
+    },
+    "strategy_name": {
+      "type": "string",
+      "description": "Human-readable display name at time of manifest."
+    },
+    "run_type": {
+      "type": "string",
+      "enum": ["scheduled", "manual_salvage", "backfill_historical", "shadow_test"]
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp with timezone offset for when the manifest JSON was serialized."
+    },
+    "anchor_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Date the OpenTimestamps stamp was requested. Everything after this date is cryptographically provable to have existed before it."
+    },
+    "original_event_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Date the underlying rebalance/pick actually occurred. For live rebalances, equals anchor_date. For historical backfill, precedes anchor_date."
+    },
+    "retroactive": {
+      "type": "boolean",
+      "description": "True when original_event_date precedes anchor_date. Cryptographic proof does NOT extend before anchor_date for retroactive entries; retroactive=true entries are ACIS's own record, not third-party-verifiable pick timing."
+    },
+    "model": {
+      "type": "object",
+      "required": ["name", "version", "feature_store_hash"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Model name (e.g. 'lgbm_value_largecap', 'sector_voltgt15', 'options_direction_config7')."
+        },
+        "version": {
+          "type": "string",
+          "description": "Version tag (e.g. '1.0_production')."
+        },
+        "feature_store_hash": {
+          "type": "string",
+          "description": "SHA-256 (hex, 64 chars) of the deterministically-serialized feature snapshot fed into this run. Enables 'we can reproduce the exact scoring input' claim.",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "training_data_cutoff": {
+          "type": ["string", "null"],
+          "format": "date",
+          "description": "Last training-data observation date (strict-PIT). Null for retroactive entries where cutoff was not recorded."
+        }
+      }
+    },
+    "regime": {
+      "type": "object",
+      "required": ["state_label", "probability_vector"],
+      "additionalProperties": false,
+      "properties": {
+        "state_label": {
+          "type": "string",
+          "description": "Argmax regime label at the moment of the run (e.g. 'vol_expansion', 'normal', 'risk_off')."
+        },
+        "probability_vector": {
+          "type": "object",
+          "description": "Map of regime_state -> probability. Keys sorted at serialize time for determinism.",
+          "additionalProperties": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      }
+    },
+    "positions": {
+      "type": "array",
+      "description": "Full holding list AFTER the rebalance is applied. Order MUST match the order of appearance in the source table (positions jsonb), preserved as-is. Do not re-sort in the manifest — order is signal.",
+      "items": {
+        "type": "object",
+        "required": ["ticker", "weight"],
+        "additionalProperties": false,
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "pattern": "^[A-Z0-9.\\-]{1,10}$"
+          },
+          "weight": {
+            "type": "number",
+            "description": "Portfolio weight (0-1). Sum across positions SHOULD equal 1.0 within 1e-6 for long-only equity streams; may deviate for options.",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "shares": {
+            "type": ["number", "null"],
+            "description": "Share count for the recorded book. Null if manifest represents a target-weight decision without a fixed dollar book."
+          },
+          "entry_price": {
+            "type": ["number", "null"],
+            "description": "Execution price recorded in the source table."
+          },
+          "model_score": {
+            "type": ["number", "null"],
+            "description": "Raw model score / predicted return / rank input for this pick."
+          },
+          "rank_in_universe": {
+            "type": ["integer", "null"],
+            "description": "1-indexed rank within the scored universe (1 = top pick)."
+          }
+        }
+      }
+    },
+    "rationale": {
+      "type": "object",
+      "description": "AI-generated commentary snapshotted from the source table at manifest time. All fields may be null when source row had not yet been evaluated.",
+      "additionalProperties": false,
+      "properties": {
+        "portfolio_evaluation": {"type": ["string", "null"]},
+        "sector_evaluation": {"type": ["string", "null"]},
+        "market_narrative": {"type": ["string", "null"]},
+        "regime_evaluation": {"type": ["string", "null"]},
+        "performance_evaluation": {"type": ["string", "null"]}
+      }
+    },
+    "backtest_snapshot": {
+      "type": "object",
+      "description": "Walk-forward metadata locking in the OOS numbers used to justify this strategy at manifest time. Retroactive manifests reproduce the values at the RUN date, not today.",
+      "required": ["walk_forward_start", "walk_forward_end"],
+      "additionalProperties": false,
+      "properties": {
+        "walk_forward_start": {"type": "string", "format": "date"},
+        "walk_forward_end": {"type": "string", "format": "date"},
+        "oos_sharpe": {"type": ["number", "null"]},
+        "oos_alpha_annual_pct": {"type": ["number", "null"]},
+        "oos_maxdd_pct": {"type": ["number", "null"]},
+        "oos_cagr_pct": {"type": ["number", "null"]},
+        "backtest_commit_hash": {
+          "type": ["string", "null"],
+          "description": "Git commit of platform code used to generate the backtest snapshot. Enables reviewer reproduction."
+        },
+        "capacity_usd_estimate": {"type": ["number", "null"]}
+      }
+    },
+    "prev_manifest_hash": {
+      "type": ["string", "null"],
+      "description": "content_hash of the immediately preceding manifest for the same (stream, strategy_id) tuple. Null for the first entry per stream+strategy. Forms an append-only Merkle chain that makes silent rewrites impossible.",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "content_hash": {
+      "type": "string",
+      "description": "SHA-256 (hex, 64 chars) of the manifest with `content_hash` field ABSENT, serialized deterministically (sort_keys=True, separators=(',', ':'), ensure_ascii=False, UTF-8). This is the value stamped via OpenTimestamps.",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}
